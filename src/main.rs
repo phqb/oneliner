@@ -4,7 +4,7 @@ use canny_devernay::{canny_devernay, rgb_to_grayscale, write_pathes_as_svg};
 use image::{codecs::pnm::PnmDecoder, ColorType, ImageDecoder};
 
 fn main() {
-    let image_file = File::open("cabbit.pgm").unwrap();
+    let image_file = File::open("image.pgm").unwrap();
     let decoder = PnmDecoder::new(image_file).unwrap();
     let (width, height) = decoder.dimensions();
     let color_type = decoder.color_type();
@@ -20,13 +20,6 @@ fn main() {
         _ => panic!("unsupported color type {:?}", color_type),
     };
 
-    let pathes = canny_devernay(
-        &image_gray,
-        height as usize,
-        width as usize,
-        1.0,
-        10.0,
-        15.0,
-    );
+    let pathes = canny_devernay(&image_gray, height as usize, width as usize, 1.0, 0.0, 0.0);
     write_pathes_as_svg(std::io::stdout(), &pathes, height as usize, width as usize).unwrap();
 }

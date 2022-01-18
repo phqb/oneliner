@@ -24,6 +24,8 @@ fn rotate_90_deg(x: f64, y: f64) -> (f64, f64) {
     (-y, x)
 }
 
+const NONE: usize = usize::MAX;
+
 // https://stackoverflow.com/a/8204880
 pub fn gaussian_kernel(height: usize, width: usize, s: f64) -> Vec<f64> {
     let half_height = height >> 1;
@@ -119,16 +121,16 @@ fn neighbors_5x5(x: usize, y: usize, width: usize, height: usize) -> Vec<usize> 
     ns
 }
 
-fn unlink(prev: &mut [Option<usize>], next: &mut [Option<usize>], a: usize, b: usize) {
-    if next[a] == Some(b) && prev[b] == Some(a) {
-        next[a] = None;
-        prev[b] = None;
+fn unlink(prev: &mut [usize], next: &mut [usize], a: usize, b: usize) {
+    if next[a] == b && prev[b] == a {
+        next[a] = NONE;
+        prev[b] = NONE;
     }
 }
 
-fn link(prev: &mut [Option<usize>], next: &mut [Option<usize>], a: usize, b: usize) {
-    next[a] = Some(b);
-    prev[b] = Some(a);
+fn link(prev: &mut [usize], next: &mut [usize], a: usize, b: usize) {
+    next[a] = b;
+    prev[b] = a;
 }
 
 fn argmin_dist(e_x: f64, e_y: f64, e_xs: &[f64], e_ys: &[f64], ns: &[usize]) -> Option<usize> {
@@ -304,7 +306,7 @@ pub fn chain_edge_points(
     e_ys: &[f64],
     input_height: usize,
     input_width: usize,
-) -> (Vec<Option<usize>>, Vec<Option<usize>>) {
+) -> (Vec<usize>, Vec<usize>) {
     assert!(input_height > 4);
     assert!(input_width > 4);
 
@@ -313,8 +315,8 @@ pub fn chain_edge_points(
     assert_eq!(e_xs.len(), (input_height - 4) * (input_width - 4));
     assert_eq!(e_xs.len(), (input_height - 4) * (input_width - 4));
 
-    let mut prev: Vec<Option<usize>> = vec![None; (input_height - 4) * (input_width - 4)];
-    let mut next: Vec<Option<usize>> = vec![None; (input_height - 4) * (input_width - 4)];
+    let mut prev = vec![NONE; (input_height - 4) * (input_width - 4)];
+    let mut next = vec![NONE; (input_height - 4) * (input_width - 4)];
 
     // foreach e in E do
     for (e, (&e_x, &e_y)) in e_xs.iter().zip(e_ys).enumerate() {
@@ -374,19 +376,18 @@ pub fn chain_edge_points(
 
         if let Some(f) = f {
             // if ∅ -> f or (a -> f and dist(e, f) < dist(a, f)) then
-            if prev[f]
-                .map(|a| {
-                    squared_norm(e_xs[f] - e_x, e_ys[f] - e_y)
-                        < squared_norm(e_xs[f] - e_xs[a], e_ys[f] - e_ys[a])
-                })
-                .unwrap_or(true)
+            if prev[f] == NONE
+                || squared_norm(e_xs[f] - e_x, e_ys[f] - e_y)
+                    < squared_norm(e_xs[f] - e_xs[prev[f]], e_ys[f] - e_ys[prev[f]])
             {
                 // unlink * -> f, if linked
-                if let Some(a) = prev[f] {
+                if prev[f] != NONE {
+                    let a = prev[f];
                     unlink(&mut prev, &mut next, a, f);
                 }
                 // unlink e -> *, if linked
-                if let Some(a) = next[e] {
+                if next[e] != NONE {
+                    let a = next[e];
                     unlink(&mut prev, &mut next, e, a);
                 }
                 // link e -> f
@@ -396,19 +397,18 @@ pub fn chain_edge_points(
 
         if let Some(b) = b {
             // if b -> ∅ or (b -> a and dist(b, e) < dist(b, a))
-            if next[b]
-                .map(|a| {
-                    squared_norm(e_x - e_xs[b], e_y - e_ys[b])
-                        < squared_norm(e_xs[a] - e_xs[b], e_ys[a] - e_ys[b])
-                })
-                .unwrap_or(true)
+            if next[b] == NONE
+                || squared_norm(e_x - e_xs[b], e_y - e_ys[b])
+                    < squared_norm(e_xs[next[b]] - e_xs[b], e_ys[next[b]] - e_ys[b])
             {
                 // unlink b -> *, if linked
-                if let Some(a) = next[b] {
+                if next[b] != NONE {
+                    let a = next[b];
                     unlink(&mut prev, &mut next, b, a);
                 }
                 // unlink * -> e, if linked
-                if let Some(a) = prev[e] {
+                if prev[e] != NONE {
+                    let a = prev[e];
                     unlink(&mut prev, &mut next, a, e);
                 }
                 // link b -> e
@@ -421,8 +421,8 @@ pub fn chain_edge_points(
 }
 
 pub fn thresholds_with_hysteresis(
-    prev: &mut [Option<usize>],
-    next: &mut [Option<usize>],
+    prev: &mut [usize],
+    next: &mut [usize],
     g_xs: &[f64],
     g_ys: &[f64],
     h: f64,
@@ -446,40 +446,44 @@ pub fn thresholds_with_hysteresis(
 
     // foreach e in E
     for e in 0..(input_height - 4) * (input_width - 4) {
-        // and e is not valid and ||g(e)|| >= H do
-        if !valid[e] && squared_norm(g_xs[e], g_ys[e]) >= hh {
-            // set e as valid
-            valid[e] = true;
+        if next[e] != NONE && prev[e] != NONE {
+            // and e is not valid and ||g(e)|| >= H do
+            if !valid[e] && squared_norm(g_xs[e], g_ys[e]) >= hh {
+                // set e as valid
+                valid[e] = true;
 
-            // f <- e
-            let mut f = e;
+                // f <- e
+                let mut f = e;
 
-            // while f -> n
-            while let Some(n) = next[f] {
-                // and n is not valid and ||g(n)|| >= L do
-                if !valid[n] && squared_norm(g_xs[n], g_ys[n]) >= ll {
-                    // set n as valid
-                    valid[n] = true;
-                    // f <- n
-                    f = n;
-                } else {
-                    break;
+                // while f -> n
+                while next[f] != NONE {
+                    let n = next[f];
+                    // and n is not valid and ||g(n)|| >= L do
+                    if !valid[n] && squared_norm(g_xs[n], g_ys[n]) >= ll {
+                        // set n as valid
+                        valid[n] = true;
+                        // f <- n
+                        f = n;
+                    } else {
+                        break;
+                    }
                 }
-            }
 
-            // b <- e
-            let mut b = e;
+                // b <- e
+                let mut b = e;
 
-            // while n -> b
-            while let Some(n) = prev[b] {
-                // and n is not valid and ||g(n)|| >= L do
-                if !valid[n] && squared_norm(g_xs[n], g_ys[n]) >= ll {
-                    // set n as valid
-                    valid[n] = true;
-                    // b <- n
-                    b = n;
-                } else {
-                    break;
+                // while n -> b
+                while prev[b] != NONE {
+                    let n = prev[b];
+                    // and n is not valid and ||g(n)|| >= L do
+                    if !valid[n] && squared_norm(g_xs[n], g_ys[n]) >= ll {
+                        // set n as valid
+                        valid[n] = true;
+                        // b <- n
+                        b = n;
+                    } else {
+                        break;
+                    }
                 }
             }
         }
@@ -487,19 +491,70 @@ pub fn thresholds_with_hysteresis(
 
     // foreach e in E
     for e in 0..(input_height - 4) * (input_width - 4) {
-        // and e is not valid do
-        if !valid[e] {
-            // unlink e -> *, if linked
-            if let Some(a) = next[e] {
-                unlink(prev, next, e, a);
-            }
+        if next[e] != NONE && prev[e] != NONE {
+            // and e is not valid do
+            if !valid[e] {
+                // unlink e -> *, if linked
+                if next[e] != NONE {
+                    unlink(prev, next, e, next[e]);
+                }
 
-            // unlink * -> e, if linked
-            if let Some(a) = prev[e] {
-                unlink(prev, next, a, e);
+                // unlink * -> e, if linked
+                if prev[e] != NONE {
+                    unlink(prev, next, prev[e], e);
+                }
             }
         }
     }
+}
+
+fn chained_edge_points_to_pathes(
+    prev: &[usize],
+    next: &[usize],
+    e_xs: &[f64],
+    e_ys: &[f64],
+    input_height: usize,
+    input_width: usize,
+) -> Vec<Vec<(f64, f64)>> {
+    let mut marked = vec![false; (input_height - 4) * (input_width - 4)];
+    let mut pathes = vec![];
+
+    for i in 0..(input_height - 4) * (input_width - 4) {
+        if marked[i] {
+            continue;
+        }
+
+        let mut start = i;
+        while prev[start] != NONE {
+            if prev[start] == i {
+                break;
+            }
+
+            start = prev[start];
+        }
+
+        let mut path = vec![];
+
+        let mut end = start;
+        while next[end] != NONE {
+            if marked[end] {
+                break;
+            }
+
+            path.push((e_xs[end], e_ys[end]));
+            marked[end] = true;
+            end = next[end];
+        }
+
+        if end != start {
+            marked[end] = true;
+            path.push((e_xs[end], e_ys[end]));
+
+            pathes.push(path);
+        }
+    }
+
+    pathes
 }
 
 pub fn canny_devernay(
@@ -537,45 +592,8 @@ pub fn canny_devernay(
     eprintln!("thresholds_with_hysteresis() took {:?}", t.elapsed());
 
     let t = std::time::Instant::now();
-
-    let mut marked = vec![false; (input_height - 4) * (input_width - 4)];
-    let mut pathes = vec![];
-
-    for i in 0..(input_height - 4) * (input_width - 4) {
-        if marked[i] {
-            continue;
-        }
-
-        let mut start = i;
-        while let Some(a) = prev[start] {
-            if a == i {
-                break;
-            }
-
-            start = a;
-        }
-
-        let mut path = vec![];
-
-        let mut end = start;
-        while let Some(a) = next[end] {
-            if marked[end] {
-                break;
-            }
-
-            path.push((e_xs[end], e_ys[end]));
-            marked[end] = true;
-            end = a;
-        }
-
-        if end != start {
-            marked[end] = true;
-            path.push((e_xs[end], e_ys[end]));
-
-            pathes.push(path);
-        }
-    }
-
+    let pathes =
+        chained_edge_points_to_pathes(&prev, &next, &e_xs, &e_ys, input_height, input_width);
     eprintln!("converting to pathes took {:?}", t.elapsed());
 
     pathes
