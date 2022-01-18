@@ -26,74 +26,104 @@ fn rotate_90_deg(x: f64, y: f64) -> (f64, f64) {
 
 const NONE: usize = usize::MAX;
 
-// https://stackoverflow.com/a/8204880
-pub fn gaussian_kernel(height: usize, width: usize, s: f64) -> Vec<f64> {
-    let half_height = height >> 1;
-    let half_width = width >> 1;
+/// compute a Gaussian kernel of length n, standard deviation sigma,
+/// and centered at value mean.
+///
+/// for example, if mean=0.5, the Gaussian will be centered in the middle point
+/// between values kernel\[0\] and kernel\[1\].
+fn gaussian_kernel(n: usize, sigma: f64, mean: f64) -> Vec<f64> {
+    assert!(sigma > 0.0, "sigma must be positive");
 
     let mut kernel = vec![];
+    let mut sum = 0.0;
 
-    let c = 2.0 * s * s;
-
-    for y in 0..height {
-        let a = (y as f64 - half_height as f64) * (y as f64 - half_height as f64);
-
-        for x in 0..width {
-            let b = (x as f64 - half_width as f64) * (x as f64 - half_width as f64);
-            kernel.push((-(b + a) / c).exp());
-        }
+    // compute Gaussian kernel
+    for i in 0..n {
+        let val = (i as f64 - mean) / sigma;
+        let k = (-0.5 * val * val).exp();
+        kernel.push(k);
+        sum += k;
     }
 
-    let sum = kernel.iter().sum::<f64>();
-    kernel.iter_mut().for_each(|v| *v /= sum);
+    // normalization
+    if sum > 0.0 {
+        kernel.iter_mut().for_each(|k| *k /= sum);
+    }
 
     kernel
 }
 
-pub fn conv(
-    input: &[u8],
-    input_height: usize,
-    input_width: usize,
-    kernel: &[f64],
-    kernel_height: usize,
-    kernel_width: usize,
-) -> Vec<f64> {
-    assert!(kernel_height % 2 != 0);
-    assert!(kernel_width % 2 != 0);
+fn gaussian_filter(input: &[u8], input_height: usize, input_width: usize, sigma: f64) -> Vec<f64> {
+    assert!(sigma > 0.0, "sigma must be positive");
 
-    assert_eq!(kernel.len(), kernel_height * kernel_width);
-    assert_eq!(input.len(), input_height * input_width);
+    // The size of the kernel is selected to guarantee that the first discarded
+    // term is at least 10^prec times smaller than the central value. For that,
+    // the half size of the kernel must be larger than x, with
+    //   e^(-x^2/2sigma^2) = 1/10^prec
+    // Then,
+    //   x = sigma * sqrt( 2 * prec * ln(10) )
+    let prec = 3.0;
+    let offset = (sigma * (2.0 * prec * (10.0f64).ln()).sqrt()).ceil() as usize;
+    let n = 1 + 2 + offset;
+    let kernel = gaussian_kernel(n, sigma, offset as f64);
 
-    let half_width = (kernel_width >> 1) as i64;
-    let half_height = (kernel_height >> 1) as i64;
+    let w2 = (2 * input_width) as isize;
+    let h2 = (2 * input_height) as isize;
 
+    let mut temp = vec![];
     let mut output = vec![];
 
-    for iy in 0..input_height {
-        for ix in 0..input_width {
-            let mut v = 0f64;
+    // x axis convolution
+    for y in 0..input_height {
+        for x in 0..input_width {
+            let mut val = 0.0;
 
-            for ky in 0..kernel_height {
-                let mut y = (iy as i64 + ky as i64 - half_height) % input_height as i64;
-                if y < 0 {
-                    y += input_height as i64;
+            for i in 0..n {
+                let mut j = x as isize - offset as isize + i as isize;
+
+                while j < 0 {
+                    j += w2;
                 }
 
-                let y = y as usize;
-
-                for kx in 0..kernel_width {
-                    let mut x = (ix as i64 + kx as i64 - half_width) % input_width as i64;
-                    if x < 0 {
-                        x += input_width as i64;
-                    }
-
-                    let x = x as usize;
-
-                    v += input[c2i(x, y, input_width)] as f64 * kernel[c2i(kx, ky, kernel_width)];
+                while j >= w2 {
+                    j -= w2;
                 }
+
+                if j >= input_width as isize {
+                    j = w2 - 1 - j;
+                }
+
+                val += input[y * input_width + j as usize] as f64 * kernel[i];
             }
 
-            output.push(v);
+            temp.push(val);
+        }
+    }
+
+    // y axis convolution
+    for y in 0..input_height {
+        for x in 0..input_width {
+            let mut val = 0.0;
+
+            for i in 0..n {
+                let mut j = y as isize - offset as isize + i as isize;
+
+                while j < 0 {
+                    j += h2;
+                }
+
+                while j >= h2 {
+                    j -= h2;
+                }
+
+                if j >= input_height as isize {
+                    j = h2 - 1 - j;
+                }
+
+                val += temp[(j as usize) * input_width + x] as f64 * kernel[i];
+            }
+
+            output.push(val);
         }
     }
 
@@ -151,27 +181,20 @@ fn argmin_dist(e_x: f64, e_y: f64, e_xs: &[f64], e_ys: &[f64], ns: &[usize]) -> 
     Some(i)
 }
 
-pub fn image_gradient(
+fn image_gradient(
     input: &[u8],
     input_height: usize,
     input_width: usize,
-    s: f64,
+    sigma: f64,
 ) -> (Vec<f64>, Vec<f64>) {
     assert!(input_height > 2);
     assert!(input_width > 2);
 
-    let (kernel_height, kernel_width) = (11, 11);
-    let kernel = gaussian_kernel(kernel_height, kernel_width, s);
-
-    // I_S <- I * K_S convolution with a Gaussian kernel
-    let input = conv(
-        input,
-        input_height,
-        input_width,
-        &kernel,
-        kernel_height,
-        kernel_width,
-    );
+    let input = if sigma == 0.0 {
+        input.iter().map(|e| *e as f64).collect()
+    } else {
+        gaussian_filter(input, input_height, input_width, sigma)
+    };
 
     let mut g_xs = vec![];
     let mut g_ys = vec![];
@@ -193,7 +216,7 @@ pub fn image_gradient(
     (g_xs, g_ys)
 }
 
-pub fn compute_edge_points(
+fn compute_edge_points(
     g_xs: &[f64],
     g_ys: &[f64],
     input_height: usize,
@@ -279,7 +302,7 @@ pub fn compute_edge_points(
     (e_xs, e_ys)
 }
 
-pub fn chain_edge_points(
+fn chain_edge_points(
     g_xs: &[f64],
     g_ys: &[f64],
     e_xs: &[f64],
@@ -400,7 +423,7 @@ pub fn chain_edge_points(
     (prev, next)
 }
 
-pub fn thresholds_with_hysteresis(
+fn thresholds_with_hysteresis(
     prev: &mut [usize],
     next: &mut [usize],
     g_xs: &[f64],
@@ -527,6 +550,7 @@ fn chained_edge_points_to_pathes(
         let mut end = start;
         while next[end] != NONE {
             if marked[end] {
+                path.push((e_xs[end], e_ys[end]));
                 break;
             }
 
@@ -628,21 +652,7 @@ pub fn write_pathes_as_svg<W: std::io::Write>(
 
 #[cfg(test)]
 mod test {
-    use crate::{c2i, conv, gaussian_kernel, i2c, neighbors_5x5};
-
-    #[test]
-    fn test_gaussian_kernel() {
-        let k = gaussian_kernel(5, 5, 0.84089642);
-        println!("{:?}", k);
-    }
-
-    #[test]
-    fn test_conv() {
-        let input = vec![1u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
-        let kernel = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0];
-        let output = conv(&input, 4, 4, &kernel, 3, 3);
-        println!("{:?}", output);
-    }
+    use crate::{c2i, i2c, neighbors_5x5};
 
     #[test]
     fn test_coord_index_conversion() {

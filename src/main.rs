@@ -4,7 +4,12 @@ use canny_devernay::{canny_devernay, rgb_to_grayscale, write_pathes_as_svg};
 use image::{codecs::pnm::PnmDecoder, ColorType, ImageDecoder};
 
 fn main() {
-    let image_file = File::open("image.pgm").unwrap();
+    let args = std::env::args().into_iter().take(3).collect::<Vec<_>>();
+    let (input_path, output_prefix) = (&args[1], &args[2]);
+    let input_path = std::path::Path::new(input_path);
+    let input_file_name = input_path.file_name().unwrap().to_str().unwrap();
+
+    let image_file = File::open(input_path).unwrap();
     let decoder = PnmDecoder::new(image_file).unwrap();
     let (width, height) = decoder.dimensions();
     let color_type = decoder.color_type();
@@ -20,10 +25,44 @@ fn main() {
         _ => panic!("unsupported color type {:?}", color_type),
     };
 
-    const S: f64 = 2.0;
-    const H: f64 = 5.0;
-    const L: f64 = 5.0;
+    let params = vec![
+        (0, 0, 0),
+        (1, 0, 0),
+        (2, 0, 0),
+        (1, 5, 5),
+        (1, 10, 10),
+        (1, 15, 15),
+        (1, 20, 20),
+        (1, 5, 10),
+        (1, 5, 15),
+        (1, 5, 20),
+        (1, 0, 15),
+        (1, 1, 15),
+        (1, 3, 15),
+        (1, 10, 15),
+    ];
 
-    let pathes = canny_devernay(&image_gray, height as usize, width as usize, S, H, L);
-    write_pathes_as_svg(std::io::stdout(), &pathes, height as usize, width as usize).unwrap();
+    for (s, l, h) in params {
+        println!("S = {}, L = {}, H = {}", s, l, h);
+
+        let output_path = std::path::Path::new(output_prefix)
+            .join(format!("{}_{}_{}_{}.svg", input_file_name, s, l, h));
+
+        let pathes = canny_devernay(
+            &image_gray,
+            height as usize,
+            width as usize,
+            s as f64,
+            h as f64,
+            l as f64,
+        );
+
+        write_pathes_as_svg(
+            File::create(output_path).unwrap(),
+            &pathes,
+            height as usize,
+            width as usize,
+        )
+        .unwrap();
+    }
 }
