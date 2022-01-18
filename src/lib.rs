@@ -6,11 +6,11 @@ fn squared_norm(x: f64, y: f64) -> f64 {
     x * x + y * y
 }
 
-fn coord_to_index(x: usize, y: usize, width: usize) -> usize {
+fn c2i(x: usize, y: usize, width: usize) -> usize {
     y * width + x
 }
 
-fn index_to_coord(index: usize, width: usize) -> (usize, usize) {
+fn i2c(index: usize, width: usize) -> (usize, usize) {
     let y = index / width;
     let x = index % width;
     (x, y)
@@ -89,8 +89,7 @@ pub fn conv(
 
                     let x = x as usize;
 
-                    v += input[coord_to_index(x, y, input_width)] as f64
-                        * kernel[coord_to_index(kx, ky, kernel_width)];
+                    v += input[c2i(x, y, input_width)] as f64 * kernel[c2i(kx, ky, kernel_width)];
                 }
             }
 
@@ -111,7 +110,7 @@ fn neighbors_5x5(x: usize, y: usize, width: usize, height: usize) -> Vec<usize> 
                     let xn = x + xi - 2;
                     let yn = y + yi - 2;
                     if !(xn == x && yn == y) {
-                        ns.push(coord_to_index(xn, yn, width));
+                        ns.push(c2i(xn, yn, width));
                     }
                 }
             }
@@ -181,15 +180,9 @@ pub fn image_gradient(
     for y in 1..input_height - 1 {
         for x in 1..input_width - 1 {
             // g_x(x, y) <- I_S(x + 1, y) - I_S(x - 1, y)
-            g_xs.push(
-                input[coord_to_index(x + 1, y, input_width)]
-                    - input[coord_to_index(x - 1, y, input_width)],
-            );
+            g_xs.push(input[c2i(x + 1, y, input_width)] - input[c2i(x - 1, y, input_width)]);
             // g_y(x, y) <- I_S(x, y + 1) - I_S(x, y - 1)
-            g_ys.push(
-                input[coord_to_index(x, y + 1, input_width)]
-                    - input[coord_to_index(x, y - 1, input_width)],
-            );
+            g_ys.push(input[c2i(x, y + 1, input_width)] - input[c2i(x, y - 1, input_width)]);
         }
     }
 
@@ -226,39 +219,26 @@ pub fn compute_edge_points(
             // θ_y <- 0
             let mut theta_y = 0usize;
 
-            let norm_xy = squared_norm(
-                g_xs[coord_to_index(x, y, g_width)],
-                g_ys[coord_to_index(x, y, g_width)],
-            );
-            let norm_x_minus_1_y = squared_norm(
-                g_xs[coord_to_index(x - 1, y, g_width)],
-                g_ys[coord_to_index(x - 1, y, g_width)],
-            );
-            let norm_x_plus_1_y = squared_norm(
-                g_xs[coord_to_index(x + 1, y, g_width)],
-                g_ys[coord_to_index(x + 1, y, g_width)],
-            );
-            let norm_x_y_minus_1 = squared_norm(
-                g_xs[coord_to_index(x, y - 1, g_width)],
-                g_ys[coord_to_index(x, y - 1, g_width)],
-            );
-            let norm_x_y_plus_1 = squared_norm(
-                g_xs[coord_to_index(x, y + 1, g_width)],
-                g_ys[coord_to_index(x, y + 1, g_width)],
-            );
+            let norm_xy = squared_norm(g_xs[c2i(x, y, g_width)], g_ys[c2i(x, y, g_width)]);
+            let norm_x_minus_1_y =
+                squared_norm(g_xs[c2i(x - 1, y, g_width)], g_ys[c2i(x - 1, y, g_width)]);
+            let norm_x_plus_1_y =
+                squared_norm(g_xs[c2i(x + 1, y, g_width)], g_ys[c2i(x + 1, y, g_width)]);
+            let norm_x_y_minus_1 =
+                squared_norm(g_xs[c2i(x, y - 1, g_width)], g_ys[c2i(x, y - 1, g_width)]);
+            let norm_x_y_plus_1 =
+                squared_norm(g_xs[c2i(x, y + 1, g_width)], g_ys[c2i(x, y + 1, g_width)]);
 
             // if ||g(x - 1, y)|| < ||g(x, y)| >= ||g(x + 1, y)|| and |g_x(x, y)| >= |g_y(x, y)| then
             if norm_x_minus_1_y < norm_xy
                 && norm_xy >= norm_x_plus_1_y
-                && g_xs[coord_to_index(x, y, g_width)].abs()
-                    >= g_ys[coord_to_index(x, y, g_width)].abs()
+                && g_xs[c2i(x, y, g_width)].abs() >= g_ys[c2i(x, y, g_width)].abs()
             {
                 // θ_x <- 1
                 theta_x = 1;
             } else if norm_x_y_minus_1 < norm_xy
                 && norm_xy >= norm_x_y_plus_1
-                && g_xs[coord_to_index(x, y, g_width)].abs()
-                    <= g_ys[coord_to_index(x, y, g_width)].abs()
+                && g_xs[c2i(x, y, g_width)].abs() <= g_ys[c2i(x, y, g_width)].abs()
             {
                 // θ_y <- 1
                 theta_y = 1;
@@ -268,16 +248,16 @@ pub fn compute_edge_points(
             if theta_x != 0 || theta_y != 0 {
                 // a <- ||g(x - θ_x, y - θ_y)||
                 let a = squared_norm(
-                    g_xs[coord_to_index(x - theta_x, y - theta_y, g_width)],
-                    g_ys[coord_to_index(x - theta_x, y - theta_y, g_width)],
+                    g_xs[c2i(x - theta_x, y - theta_y, g_width)],
+                    g_ys[c2i(x - theta_x, y - theta_y, g_width)],
                 )
                 .sqrt();
                 // b <- ||g(x, y)||
                 let b = norm_xy.sqrt();
                 // c <- ||g(x + θ_x, y + θ_y)||
                 let c = squared_norm(
-                    g_xs[coord_to_index(x + theta_x, y + theta_y, g_width)],
-                    g_ys[coord_to_index(x + theta_x, y + theta_y, g_width)],
+                    g_xs[c2i(x + theta_x, y + theta_y, g_width)],
+                    g_ys[c2i(x + theta_x, y + theta_y, g_width)],
                 )
                 .sqrt();
                 // λ <- (a - c) / (2*(a - 2b + c))
@@ -325,7 +305,7 @@ pub fn chain_edge_points(
             continue;
         }
 
-        let (x_e, y_e) = index_to_coord(e, input_width - 4);
+        let (x_e, y_e) = i2c(e, input_width - 4);
         let ns = neighbors_5x5(x_e, y_e, input_width - 4, input_height - 4);
 
         let mut n_f = vec![];
@@ -339,21 +319,21 @@ pub fn chain_edge_points(
                 continue;
             }
 
-            let (x_n, y_n) = index_to_coord(n, input_width - 4);
+            let (x_n, y_n) = i2c(n, input_width - 4);
 
             // g(e) · g(n)
             let d1 = dot(
-                g_xs[coord_to_index(x_e + 1, y_e + 1, input_width - 2)],
-                g_ys[coord_to_index(x_e + 1, y_e + 1, input_width - 2)],
-                g_xs[coord_to_index(x_n + 1, y_n + 1, input_width - 2)],
-                g_ys[coord_to_index(x_n + 1, y_n + 1, input_width - 2)],
+                g_xs[c2i(x_e + 1, y_e + 1, input_width - 2)],
+                g_ys[c2i(x_e + 1, y_e + 1, input_width - 2)],
+                g_xs[c2i(x_n + 1, y_n + 1, input_width - 2)],
+                g_ys[c2i(x_n + 1, y_n + 1, input_width - 2)],
             );
 
             if d1 > 0.0 {
                 // g(e)^⊥
                 let (tx, ty) = rotate_90_deg(
-                    g_xs[coord_to_index(x_e + 1, y_e + 1, input_width - 2)],
-                    g_ys[coord_to_index(x_e + 1, y_e + 1, input_width - 2)],
+                    g_xs[c2i(x_e + 1, y_e + 1, input_width - 2)],
+                    g_ys[c2i(x_e + 1, y_e + 1, input_width - 2)],
                 );
                 // (vector from e to n) · g(e)^⊥
                 let d2 = dot(e_xs[n] - e_x, e_ys[n] - e_y, tx, ty);
@@ -438,17 +418,20 @@ pub fn thresholds_with_hysteresis(
     assert_eq!(prev.len(), (input_height - 4) * (input_width - 4));
     assert_eq!(next.len(), (input_height - 4) * (input_width - 4));
 
-    // foreach e in E do set e as not valid
-    let mut valid = vec![false; (input_height - 4) * (input_width - 4)];
-
     let hh = h * h;
     let ll = l * l;
 
-    // foreach e in E
+    // foreach e in E do set e as not valid
+    let mut valid = vec![false; (input_height - 4) * (input_width - 4)];
+
     for e in 0..(input_height - 4) * (input_width - 4) {
-        if next[e] != NONE && prev[e] != NONE {
+        // foreach e in E
+        if next[e] != NONE || prev[e] != NONE {
+            let (x, y) = i2c(e, input_width - 4);
+            let e_g = c2i(x + 1, y + 1, input_width - 2);
+
             // and e is not valid and ||g(e)|| >= H do
-            if !valid[e] && squared_norm(g_xs[e], g_ys[e]) >= hh {
+            if !valid[e] && squared_norm(g_xs[e_g], g_ys[e_g]) >= hh {
                 // set e as valid
                 valid[e] = true;
 
@@ -458,8 +441,11 @@ pub fn thresholds_with_hysteresis(
                 // while f -> n
                 while next[f] != NONE {
                     let n = next[f];
+                    let (x, y) = i2c(n, input_width - 4);
+                    let n_g = c2i(x + 1, y + 1, input_width - 2);
+
                     // and n is not valid and ||g(n)|| >= L do
-                    if !valid[n] && squared_norm(g_xs[n], g_ys[n]) >= ll {
+                    if !valid[n] && squared_norm(g_xs[n_g], g_ys[n_g]) >= ll {
                         // set n as valid
                         valid[n] = true;
                         // f <- n
@@ -475,8 +461,11 @@ pub fn thresholds_with_hysteresis(
                 // while n -> b
                 while prev[b] != NONE {
                     let n = prev[b];
+                    let (x, y) = i2c(n, input_width - 4);
+                    let n_g = c2i(x + 1, y + 1, input_width - 2);
+
                     // and n is not valid and ||g(n)|| >= L do
-                    if !valid[n] && squared_norm(g_xs[n], g_ys[n]) >= ll {
+                    if !valid[n] && squared_norm(g_xs[n_g], g_ys[n_g]) >= ll {
                         // set n as valid
                         valid[n] = true;
                         // b <- n
@@ -489,9 +478,9 @@ pub fn thresholds_with_hysteresis(
         }
     }
 
-    // foreach e in E
     for e in 0..(input_height - 4) * (input_width - 4) {
-        if next[e] != NONE && prev[e] != NONE {
+        // foreach e in E
+        if next[e] != NONE || prev[e] != NONE {
             // and e is not valid do
             if !valid[e] {
                 // unlink e -> *, if linked
@@ -639,7 +628,7 @@ pub fn write_pathes_as_svg<W: std::io::Write>(
 
 #[cfg(test)]
 mod test {
-    use crate::{conv, coord_to_index, gaussian_kernel, index_to_coord, neighbors_5x5};
+    use crate::{c2i, conv, gaussian_kernel, i2c, neighbors_5x5};
 
     #[test]
     fn test_gaussian_kernel() {
@@ -660,8 +649,8 @@ mod test {
         let width = 1000;
         for y in 0..width {
             for x in 0..width {
-                let index = coord_to_index(x, y, width);
-                let (x1, y1) = index_to_coord(index, width);
+                let index = c2i(x, y, width);
+                let (x1, y1) = i2c(index, width);
                 assert_eq!(x, x1);
                 assert_eq!(y, y1);
             }
@@ -672,9 +661,6 @@ mod test {
     fn test_neighbors_5x5() {
         let n = neighbors_5x5(2, 2, 5, 5);
         println!("{}", n.len());
-        println!(
-            "{:?}",
-            n.iter().map(|i| index_to_coord(*i, 5)).collect::<Vec<_>>()
-        );
+        println!("{:?}", n.iter().map(|i| i2c(*i, 5)).collect::<Vec<_>>());
     }
 }

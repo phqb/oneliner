@@ -20,6 +20,10 @@ fn main() {
         _ => panic!("unsupported color type {:?}", color_type),
     };
 
-    let pathes = canny_devernay(&image_gray, height as usize, width as usize, 1.0, 0.0, 0.0);
+    const S: f64 = 2.0;
+    const H: f64 = 5.0;
+    const L: f64 = 5.0;
+
+    let pathes = canny_devernay(&image_gray, height as usize, width as usize, S, H, L);
     write_pathes_as_svg(std::io::stdout(), &pathes, height as usize, width as usize).unwrap();
 }
