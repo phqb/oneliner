@@ -1,616 +1,14 @@
-pub fn rgb_to_grayscale(r: u8, g: u8, b: u8) -> u8 {
-    (0.299 * r as f64 + 0.587 * g as f64 + 0.114 * b as f64) as u8
-}
-
-fn squared_norm(x: f64, y: f64) -> f64 {
-    x * x + y * y
-}
-
-fn c2i(x: usize, y: usize, width: usize) -> usize {
-    y * width + x
-}
-
-fn i2c(index: usize, width: usize) -> (usize, usize) {
-    let y = index / width;
-    let x = index % width;
-    (x, y)
-}
-
-fn dot(x1: f64, y1: f64, x2: f64, y2: f64) -> f64 {
-    x1 * x2 + y1 * y2
-}
-
-fn rotate_90_deg(x: f64, y: f64) -> (f64, f64) {
-    (-y, x)
-}
-
-const NONE: usize = usize::MAX;
-
-/// compute a Gaussian kernel of length n, standard deviation sigma,
-/// and centered at value mean.
-///
-/// for example, if mean=0.5, the Gaussian will be centered in the middle point
-/// between values kernel\[0\] and kernel\[1\].
-fn gaussian_kernel(n: usize, sigma: f64, mean: f64) -> Vec<f64> {
-    assert!(sigma > 0.0, "sigma must be positive");
-
-    let mut kernel = vec![];
-    let mut sum = 0.0;
-
-    // compute Gaussian kernel
-    for i in 0..n {
-        let val = (i as f64 - mean) / sigma;
-        let k = (-0.5 * val * val).exp();
-        kernel.push(k);
-        sum += k;
-    }
-
-    // normalization
-    if sum > 0.0 {
-        kernel.iter_mut().for_each(|k| *k /= sum);
-    }
-
-    kernel
-}
-
-fn gaussian_filter(input: &[u8], input_height: usize, input_width: usize, sigma: f64) -> Vec<f64> {
-    assert!(sigma > 0.0, "sigma must be positive");
-
-    // The size of the kernel is selected to guarantee that the first discarded
-    // term is at least 10^prec times smaller than the central value. For that,
-    // the half size of the kernel must be larger than x, with
-    //   e^(-x^2/2sigma^2) = 1/10^prec
-    // Then,
-    //   x = sigma * sqrt( 2 * prec * ln(10) )
-    let prec = 3.0;
-    let offset = (sigma * (2.0 * prec * (10.0f64).ln()).sqrt()).ceil() as usize;
-    let n = 1 + 2 + offset;
-    let kernel = gaussian_kernel(n, sigma, offset as f64);
-
-    let w2 = (2 * input_width) as isize;
-    let h2 = (2 * input_height) as isize;
-
-    let mut temp = vec![];
-    let mut output = vec![];
-
-    // x axis convolution
-    for y in 0..input_height {
-        for x in 0..input_width {
-            let mut val = 0.0;
-
-            for i in 0..n {
-                let mut j = x as isize - offset as isize + i as isize;
-
-                while j < 0 {
-                    j += w2;
-                }
-
-                while j >= w2 {
-                    j -= w2;
-                }
-
-                if j >= input_width as isize {
-                    j = w2 - 1 - j;
-                }
-
-                val += input[y * input_width + j as usize] as f64 * kernel[i];
-            }
-
-            temp.push(val);
-        }
-    }
-
-    // y axis convolution
-    for y in 0..input_height {
-        for x in 0..input_width {
-            let mut val = 0.0;
-
-            for i in 0..n {
-                let mut j = y as isize - offset as isize + i as isize;
-
-                while j < 0 {
-                    j += h2;
-                }
-
-                while j >= h2 {
-                    j -= h2;
-                }
-
-                if j >= input_height as isize {
-                    j = h2 - 1 - j;
-                }
-
-                val += temp[(j as usize) * input_width + x] as f64 * kernel[i];
-            }
-
-            output.push(val);
-        }
-    }
-
-    output
-}
-
-fn neighbors_5x5(x: usize, y: usize, width: usize, height: usize) -> Vec<usize> {
-    let mut ns = vec![];
-
-    for yi in 0..5 {
-        if y + yi >= 2 && y + yi < height + 2 {
-            for xi in 0..5 {
-                if x + xi >= 2 && x + xi < width + 2 {
-                    let xn = x + xi - 2;
-                    let yn = y + yi - 2;
-                    if !(xn == x && yn == y) {
-                        ns.push(c2i(xn, yn, width));
-                    }
-                }
-            }
-        }
-    }
-
-    ns
-}
-
-fn unlink(prev: &mut [usize], next: &mut [usize], a: usize, b: usize) {
-    if next[a] == b && prev[b] == a {
-        next[a] = NONE;
-        prev[b] = NONE;
-    }
-}
-
-fn link(prev: &mut [usize], next: &mut [usize], a: usize, b: usize) {
-    next[a] = b;
-    prev[b] = a;
-}
-
-fn argmin_dist(e_x: f64, e_y: f64, e_xs: &[f64], e_ys: &[f64], ns: &[usize]) -> Option<usize> {
-    if ns.is_empty() {
-        return None;
-    }
-
-    let mut i = ns[0];
-    let mut min_d = squared_norm(e_xs[i] - e_x, e_ys[i] - e_y);
-
-    for &n in ns.iter().skip(1) {
-        let d = squared_norm(e_xs[n] - e_x, e_ys[n] - e_y);
-        if d < min_d {
-            min_d = d;
-            i = n;
-        }
-    }
-
-    Some(i)
-}
-
-fn image_gradient(
-    input: &[u8],
-    input_height: usize,
-    input_width: usize,
-    sigma: f64,
-) -> (Vec<f64>, Vec<f64>) {
-    assert!(input_height > 2);
-    assert!(input_width > 2);
-
-    let input = if sigma == 0.0 {
-        input.iter().map(|e| *e as f64).collect()
-    } else {
-        gaussian_filter(input, input_height, input_width, sigma)
-    };
-
-    let mut g_xs = vec![];
-    let mut g_ys = vec![];
-
-    // for (x, y) in I_S do
-    for y in 1..input_height - 1 {
-        for x in 1..input_width - 1 {
-            // g_x(x, y) <- I_S(x + 1, y) - I_S(x - 1, y)
-            g_xs.push(input[c2i(x + 1, y, input_width)] - input[c2i(x - 1, y, input_width)]);
-            // g_y(x, y) <- I_S(x, y + 1) - I_S(x, y - 1)
-            g_ys.push(input[c2i(x, y + 1, input_width)] - input[c2i(x, y - 1, input_width)]);
-        }
-    }
-
-    assert_eq!(g_xs.len(), (input_height - 2) * (input_width - 2));
-    assert_eq!(g_ys.len(), (input_height - 2) * (input_width - 2));
-
-    // g <- (g_x, g_y)
-    (g_xs, g_ys)
-}
-
-fn compute_edge_points(
-    g_xs: &[f64],
-    g_ys: &[f64],
-    input_height: usize,
-    input_width: usize,
-) -> (Vec<f64>, Vec<f64>) {
-    assert!(input_height > 4);
-    assert!(input_width > 4);
-
-    let g_height = input_height - 2;
-    let g_width = input_width - 2;
-
-    assert_eq!(g_xs.len(), g_height * g_width);
-    assert_eq!(g_ys.len(), g_height * g_width);
-
-    let mut e_xs = vec![];
-    let mut e_ys = vec![];
-
-    // for (x, y) in g do
-    for y in 1..g_height - 1 {
-        for x in 1..g_width - 1 {
-            // θ_x <- 0
-            let mut theta_x = 0usize;
-            // θ_y <- 0
-            let mut theta_y = 0usize;
-
-            let norm_xy = squared_norm(g_xs[c2i(x, y, g_width)], g_ys[c2i(x, y, g_width)]);
-            let norm_x_minus_1_y =
-                squared_norm(g_xs[c2i(x - 1, y, g_width)], g_ys[c2i(x - 1, y, g_width)]);
-            let norm_x_plus_1_y =
-                squared_norm(g_xs[c2i(x + 1, y, g_width)], g_ys[c2i(x + 1, y, g_width)]);
-            let norm_x_y_minus_1 =
-                squared_norm(g_xs[c2i(x, y - 1, g_width)], g_ys[c2i(x, y - 1, g_width)]);
-            let norm_x_y_plus_1 =
-                squared_norm(g_xs[c2i(x, y + 1, g_width)], g_ys[c2i(x, y + 1, g_width)]);
-
-            // if ||g(x - 1, y)|| < ||g(x, y)| >= ||g(x + 1, y)|| and |g_x(x, y)| >= |g_y(x, y)| then
-            if norm_x_minus_1_y < norm_xy
-                && norm_xy >= norm_x_plus_1_y
-                && g_xs[c2i(x, y, g_width)].abs() >= g_ys[c2i(x, y, g_width)].abs()
-            {
-                // θ_x <- 1
-                theta_x = 1;
-            } else if norm_x_y_minus_1 < norm_xy
-                && norm_xy >= norm_x_y_plus_1
-                && g_xs[c2i(x, y, g_width)].abs() <= g_ys[c2i(x, y, g_width)].abs()
-            {
-                // θ_y <- 1
-                theta_y = 1;
-            }
-
-            // if θ_x =/= 0 or θ_y =/= 0 then
-            if theta_x != 0 || theta_y != 0 {
-                // a <- ||g(x - θ_x, y - θ_y)||
-                let a = squared_norm(
-                    g_xs[c2i(x - theta_x, y - theta_y, g_width)],
-                    g_ys[c2i(x - theta_x, y - theta_y, g_width)],
-                )
-                .sqrt();
-                // b <- ||g(x, y)||
-                let b = norm_xy.sqrt();
-                // c <- ||g(x + θ_x, y + θ_y)||
-                let c = squared_norm(
-                    g_xs[c2i(x + theta_x, y + theta_y, g_width)],
-                    g_ys[c2i(x + theta_x, y + theta_y, g_width)],
-                )
-                .sqrt();
-                // λ <- (a - c) / (2*(a - 2b + c))
-                let lambda = (a - c) / (2.0 * (a - 2.0 * b + c));
-                // e_x <- x + λθ_x
-                e_xs.push(x as f64 + lambda * (theta_x as f64));
-                // e_y <- y + λθ_y
-                e_ys.push(y as f64 + lambda * (theta_y as f64));
-            } else {
-                e_xs.push(f64::NAN);
-                e_ys.push(f64::NAN);
-            }
-        }
-    }
-
-    assert_eq!(e_xs.len(), (g_height - 2) * (g_width - 2));
-    assert_eq!(e_ys.len(), (g_height - 2) * (g_width - 2));
-
-    (e_xs, e_ys)
-}
-
-fn chain_edge_points(
-    g_xs: &[f64],
-    g_ys: &[f64],
-    e_xs: &[f64],
-    e_ys: &[f64],
-    input_height: usize,
-    input_width: usize,
-) -> (Vec<usize>, Vec<usize>) {
-    assert!(input_height > 4);
-    assert!(input_width > 4);
-
-    assert_eq!(g_xs.len(), (input_height - 2) * (input_width - 2));
-    assert_eq!(g_xs.len(), (input_height - 2) * (input_width - 2));
-    assert_eq!(e_xs.len(), (input_height - 4) * (input_width - 4));
-    assert_eq!(e_xs.len(), (input_height - 4) * (input_width - 4));
-
-    let mut prev = vec![NONE; (input_height - 4) * (input_width - 4)];
-    let mut next = vec![NONE; (input_height - 4) * (input_width - 4)];
-
-    // foreach e in E do
-    for (e, (&e_x, &e_y)) in e_xs.iter().zip(e_ys).enumerate() {
-        if e_x.is_nan() || e_y.is_nan() {
-            // skip non edge points
-            continue;
-        }
-
-        let (x_e, y_e) = i2c(e, input_width - 4);
-        let ns = neighbors_5x5(x_e, y_e, input_width - 4, input_height - 4);
-
-        let mut n_f = vec![];
-        let mut n_b = vec![];
-
-        // N_F <- { n in N_E(e, 2): g(e) · g(n) > 0 and (vector from e to n) · g(e)^⊥ > 0 }
-        // N_B <- { n in N_E(e, 2): g(e) · g(n) > 0 and (vector from e to n) · g(e)^⊥ < 0 }
-        for n in ns {
-            if e_xs[n].is_nan() || e_ys[n].is_nan() {
-                // skip non edge points
-                continue;
-            }
-
-            let (x_n, y_n) = i2c(n, input_width - 4);
-
-            // g(e) · g(n)
-            let d1 = dot(
-                g_xs[c2i(x_e + 1, y_e + 1, input_width - 2)],
-                g_ys[c2i(x_e + 1, y_e + 1, input_width - 2)],
-                g_xs[c2i(x_n + 1, y_n + 1, input_width - 2)],
-                g_ys[c2i(x_n + 1, y_n + 1, input_width - 2)],
-            );
-
-            if d1 > 0.0 {
-                // g(e)^⊥
-                let (tx, ty) = rotate_90_deg(
-                    g_xs[c2i(x_e + 1, y_e + 1, input_width - 2)],
-                    g_ys[c2i(x_e + 1, y_e + 1, input_width - 2)],
-                );
-                // (vector from e to n) · g(e)^⊥
-                let d2 = dot(e_xs[n] - e_x, e_ys[n] - e_y, tx, ty);
-
-                if d2 > 0.0 {
-                    // forward neighbors
-                    n_f.push(n);
-                } else if d2 < 0.0 {
-                    // backward neighbors
-                    n_b.push(n);
-                }
-            }
-        }
-
-        // f <- argmin_{n in N_F} dist(e, n)
-        let f = argmin_dist(e_x, e_y, e_xs, e_ys, &n_f);
-
-        // b <- argmin_{n in N_B} dist(e, n)
-        let b = argmin_dist(e_x, e_y, e_xs, e_ys, &n_b);
-
-        if let Some(f) = f {
-            // if ∅ -> f or (a -> f and dist(e, f) < dist(a, f)) then
-            if prev[f] == NONE
-                || squared_norm(e_xs[f] - e_x, e_ys[f] - e_y)
-                    < squared_norm(e_xs[f] - e_xs[prev[f]], e_ys[f] - e_ys[prev[f]])
-            {
-                // unlink * -> f, if linked
-                if prev[f] != NONE {
-                    let a = prev[f];
-                    unlink(&mut prev, &mut next, a, f);
-                }
-                // unlink e -> *, if linked
-                if next[e] != NONE {
-                    let a = next[e];
-                    unlink(&mut prev, &mut next, e, a);
-                }
-                // link e -> f
-                link(&mut prev, &mut next, e, f);
-            }
-        }
-
-        if let Some(b) = b {
-            // if b -> ∅ or (b -> a and dist(b, e) < dist(b, a))
-            if next[b] == NONE
-                || squared_norm(e_x - e_xs[b], e_y - e_ys[b])
-                    < squared_norm(e_xs[next[b]] - e_xs[b], e_ys[next[b]] - e_ys[b])
-            {
-                // unlink b -> *, if linked
-                if next[b] != NONE {
-                    let a = next[b];
-                    unlink(&mut prev, &mut next, b, a);
-                }
-                // unlink * -> e, if linked
-                if prev[e] != NONE {
-                    let a = prev[e];
-                    unlink(&mut prev, &mut next, a, e);
-                }
-                // link b -> e
-                link(&mut prev, &mut next, b, e);
-            }
-        }
-    }
-
-    (prev, next)
-}
-
-fn thresholds_with_hysteresis(
-    prev: &mut [usize],
-    next: &mut [usize],
-    g_xs: &[f64],
-    g_ys: &[f64],
-    h: f64,
-    l: f64,
-    input_height: usize,
-    input_width: usize,
-) {
-    assert!(input_height > 4);
-    assert!(input_width > 4);
-
-    assert_eq!(g_xs.len(), (input_height - 2) * (input_width - 2));
-    assert_eq!(g_xs.len(), (input_height - 2) * (input_width - 2));
-    assert_eq!(prev.len(), (input_height - 4) * (input_width - 4));
-    assert_eq!(next.len(), (input_height - 4) * (input_width - 4));
-
-    let hh = h * h;
-    let ll = l * l;
-
-    // foreach e in E do set e as not valid
-    let mut valid = vec![false; (input_height - 4) * (input_width - 4)];
-
-    for e in 0..(input_height - 4) * (input_width - 4) {
-        // foreach e in E
-        if next[e] != NONE || prev[e] != NONE {
-            let (x, y) = i2c(e, input_width - 4);
-            let e_g = c2i(x + 1, y + 1, input_width - 2);
-
-            // and e is not valid and ||g(e)|| >= H do
-            if !valid[e] && squared_norm(g_xs[e_g], g_ys[e_g]) >= hh {
-                // set e as valid
-                valid[e] = true;
-
-                // f <- e
-                let mut f = e;
-
-                // while f -> n
-                while next[f] != NONE {
-                    let n = next[f];
-                    let (x, y) = i2c(n, input_width - 4);
-                    let n_g = c2i(x + 1, y + 1, input_width - 2);
-
-                    // and n is not valid and ||g(n)|| >= L do
-                    if !valid[n] && squared_norm(g_xs[n_g], g_ys[n_g]) >= ll {
-                        // set n as valid
-                        valid[n] = true;
-                        // f <- n
-                        f = n;
-                    } else {
-                        break;
-                    }
-                }
-
-                // b <- e
-                let mut b = e;
-
-                // while n -> b
-                while prev[b] != NONE {
-                    let n = prev[b];
-                    let (x, y) = i2c(n, input_width - 4);
-                    let n_g = c2i(x + 1, y + 1, input_width - 2);
-
-                    // and n is not valid and ||g(n)|| >= L do
-                    if !valid[n] && squared_norm(g_xs[n_g], g_ys[n_g]) >= ll {
-                        // set n as valid
-                        valid[n] = true;
-                        // b <- n
-                        b = n;
-                    } else {
-                        break;
-                    }
-                }
-            }
-        }
-    }
-
-    for e in 0..(input_height - 4) * (input_width - 4) {
-        // foreach e in E
-        if next[e] != NONE || prev[e] != NONE {
-            // and e is not valid do
-            if !valid[e] {
-                // unlink e -> *, if linked
-                if next[e] != NONE {
-                    unlink(prev, next, e, next[e]);
-                }
-
-                // unlink * -> e, if linked
-                if prev[e] != NONE {
-                    unlink(prev, next, prev[e], e);
-                }
-            }
-        }
-    }
-}
-
-fn chained_edge_points_to_pathes(
-    prev: &[usize],
-    next: &[usize],
-    e_xs: &[f64],
-    e_ys: &[f64],
-    input_height: usize,
-    input_width: usize,
-) -> Vec<Vec<(f64, f64)>> {
-    let mut marked = vec![false; (input_height - 4) * (input_width - 4)];
-    let mut pathes = vec![];
-
-    for i in 0..(input_height - 4) * (input_width - 4) {
-        if marked[i] {
-            continue;
-        }
-
-        let mut start = i;
-        while prev[start] != NONE {
-            if prev[start] == i {
-                break;
-            }
-
-            start = prev[start];
-        }
-
-        let mut path = vec![];
-
-        let mut end = start;
-        while next[end] != NONE {
-            if marked[end] {
-                path.push((e_xs[end], e_ys[end]));
-                break;
-            }
-
-            path.push((e_xs[end], e_ys[end]));
-            marked[end] = true;
-            end = next[end];
-        }
-
-        if end != start {
-            marked[end] = true;
-            path.push((e_xs[end], e_ys[end]));
-
-            pathes.push(path);
-        }
-    }
-
-    pathes
-}
-
-pub fn canny_devernay(
-    input: &[u8],
-    input_height: usize,
-    input_width: usize,
-    s: f64,
-    h: f64,
-    l: f64,
-) -> Vec<Vec<(f64, f64)>> {
-    let t = std::time::Instant::now();
-    let (g_xs, g_ys) = image_gradient(input, input_height, input_width, s);
-    eprintln!("image_gradient() took {:?}", t.elapsed());
-
-    let t = std::time::Instant::now();
-    let (e_xs, e_ys) = compute_edge_points(&g_xs, &g_ys, input_height, input_width);
-    eprintln!("compute_edge_points() took {:?}", t.elapsed());
-
-    let t = std::time::Instant::now();
-    let (mut prev, mut next) =
-        chain_edge_points(&g_xs, &g_ys, &e_xs, &e_ys, input_height, input_width);
-    eprintln!("chain_edge_points() took {:?}", t.elapsed());
-
-    let t = std::time::Instant::now();
-    thresholds_with_hysteresis(
-        &mut prev,
-        &mut next,
-        &g_xs,
-        &g_ys,
-        h,
-        l,
-        input_height,
-        input_width,
-    );
-    eprintln!("thresholds_with_hysteresis() took {:?}", t.elapsed());
-
-    let t = std::time::Instant::now();
-    let pathes =
-        chained_edge_points_to_pathes(&prev, &next, &e_xs, &e_ys, input_height, input_width);
-    eprintln!("converting to pathes took {:?}", t.elapsed());
-
-    pathes
-}
+use ramer_douglas_peucker::ramer_douglas_peucker;
+use utils::{c2i, squared_norm};
+
+pub mod canny_devernay;
+pub mod csr_graph;
+pub mod euler_cycle;
+pub mod graham_scan;
+pub mod kruskal;
+pub mod ramer_douglas_peucker;
+pub mod simulated_annealing;
+pub mod utils;
 
 pub fn write_pathes_as_svg<W: std::io::Write>(
     mut output: W,
@@ -650,27 +48,158 @@ pub fn write_pathes_as_svg<W: std::io::Write>(
     Ok(())
 }
 
-#[cfg(test)]
-mod test {
-    use crate::{c2i, i2c, neighbors_5x5};
+pub fn path_length(path: &[(f64, f64)]) -> f64 {
+    let mut len = 0.0;
 
-    #[test]
-    fn test_coord_index_conversion() {
-        let width = 1000;
-        for y in 0..width {
-            for x in 0..width {
-                let index = c2i(x, y, width);
-                let (x1, y1) = i2c(index, width);
-                assert_eq!(x, x1);
-                assert_eq!(y, y1);
+    for ((u_x, u_y), (v_x, v_y)) in path.iter().zip(path.iter().skip(1)) {
+        len += squared_norm(v_x - u_x, v_y - u_y).sqrt();
+    }
+
+    len
+}
+
+pub fn shortest_dists(pathes: &[Vec<(f64, f64)>]) -> (Vec<usize>, Vec<f64>) {
+    let n = pathes.len();
+    let mut dist_indexes = vec![0usize; n * n];
+    let mut dist_lens = vec![0.0; n * n];
+
+    for (i, from) in pathes.iter().enumerate() {
+        for (j, to) in pathes.iter().enumerate() {
+            if i <= j {
+                continue;
+            }
+
+            let mut min_d = f64::MAX;
+            let mut min_from = usize::MAX;
+            let mut min_to = usize::MAX;
+
+            for (k, (from_x, from_y)) in from.iter().enumerate() {
+                for (l, (to_x, to_y)) in to.iter().enumerate() {
+                    let d = squared_norm(to_x - from_x, to_y - from_y);
+                    if d < min_d {
+                        min_d = d;
+                        min_from = k;
+                        min_to = l;
+                    }
+                }
+            }
+
+            if min_from != usize::MAX && min_to != usize::MAX {
+                dist_indexes[c2i(i, j, n)] = min_from;
+                dist_indexes[c2i(j, i, n)] = min_to;
+
+                dist_lens[c2i(i, j, n)] = min_d.sqrt();
             }
         }
     }
 
-    #[test]
-    fn test_neighbors_5x5() {
-        let n = neighbors_5x5(2, 2, 5, 5);
-        println!("{}", n.len());
-        println!("{:?}", n.iter().map(|i| i2c(*i, 5)).collect::<Vec<_>>());
+    (dist_indexes, dist_lens)
+}
+
+pub fn shortest_dists_by_path_indexes(
+    pathes: &[Vec<(f64, f64)>],
+    indexes: &[Vec<usize>],
+) -> (Vec<usize>, Vec<f64>) {
+    let n = pathes.len();
+    let mut dist_indexes = vec![0usize; n * n];
+    let mut dist_lens = vec![0.0; n * n];
+
+    for (i, from) in pathes.iter().enumerate() {
+        let from_hull = &indexes[i];
+
+        for (j, to) in pathes.iter().enumerate() {
+            if i <= j {
+                continue;
+            }
+
+            let to_hull = &indexes[j];
+
+            let mut min_d = f64::MAX;
+            let mut min_from = usize::MAX;
+            let mut min_to = usize::MAX;
+
+            for &k in from_hull.iter() {
+                let (from_x, from_y) = from[k];
+                for &l in to_hull.iter() {
+                    let (to_x, to_y) = to[l];
+                    let d = squared_norm(to_x - from_x, to_y - from_y);
+                    if d < min_d {
+                        min_d = d;
+                        min_from = k;
+                        min_to = l;
+                    }
+                }
+            }
+
+            if min_from != usize::MAX && min_to != usize::MAX {
+                dist_indexes[c2i(i, j, n)] = min_from;
+                dist_indexes[c2i(j, i, n)] = min_to;
+
+                dist_lens[c2i(i, j, n)] = min_d.sqrt();
+            }
+        }
+    }
+
+    (dist_indexes, dist_lens)
+}
+
+pub fn connect_pathes(
+    pathes: &[Vec<(f64, f64)>],
+    indexes: &[Vec<usize>],
+) -> Vec<((usize, usize), (usize, usize))> {
+    let n = pathes.len();
+
+    let t = std::time::Instant::now();
+    let (dist_indexes, dists) = shortest_dists_by_path_indexes(pathes, &indexes);
+    println!("shortest_dists took {:?}", t.elapsed());
+
+    let t = std::time::Instant::now();
+    let mst = kruskal::kruskal(n, &dists);
+    println!("kruskal took {:?}", t.elapsed());
+
+    let points = mst
+        .iter()
+        .map(|&(u, v)| {
+            let from = dist_indexes[c2i(u, v, n)];
+            let to = dist_indexes[c2i(v, u, n)];
+            ((u, from), (v, to))
+        })
+        .collect();
+
+    points
+}
+
+pub fn simplify_pathes(
+    pathes: &mut [Vec<(f64, f64)>],
+    kept_indexes: &mut [Vec<usize>],
+    epsilon_squared: f64,
+) {
+    let mut kepts = pathes
+        .iter()
+        .zip(kept_indexes.iter())
+        .map(|(p, hull)| {
+            let mut kept = vec![false; p.len()];
+            for &h in hull {
+                kept[h] = true;
+            }
+            kept
+        })
+        .collect::<Vec<_>>();
+
+    for (path, kept) in pathes.iter().zip(kepts.iter_mut()) {
+        ramer_douglas_peucker(path, epsilon_squared, kept);
+    }
+
+    for ((path, kept), hull) in pathes.iter_mut().zip(kepts).zip(kept_indexes.iter_mut()) {
+        for (i, k) in kept.into_iter().enumerate().rev() {
+            if !k {
+                path.remove(i);
+                for h in hull.iter_mut() {
+                    if *h > i {
+                        *h -= 1;
+                    }
+                }
+            }
+        }
     }
 }

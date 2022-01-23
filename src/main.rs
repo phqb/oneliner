@@ -1,6 +1,8 @@
 use std::fs::File;
 
-use canny_devernay::{canny_devernay, rgb_to_grayscale, write_pathes_as_svg};
+use circles_drawing::{
+    canny_devernay::canny_devernay, connect_pathes, path_length, utils::*, write_pathes_as_svg,
+};
 use image::{codecs::pnm::PnmDecoder, ColorType, ImageDecoder};
 
 fn main() {
@@ -45,9 +47,6 @@ fn main() {
     for (s, l, h) in params {
         println!("S = {}, L = {}, H = {}", s, l, h);
 
-        let output_path = std::path::Path::new(output_prefix)
-            .join(format!("{}_{}_{}_{}.svg", input_file_name, s, l, h));
-
         let pathes = canny_devernay(
             &image_gray,
             height as usize,
@@ -57,8 +56,58 @@ fn main() {
             l as f64,
         );
 
+        // let t = std::time::Instant::now();
+        // let epsilon = (width as f64) * 0.02;
+
+        // let kepts = pathes.iter().map(|path| {
+        //     let mut kept = vec![false; path.len()];
+        //     ramer_douglas_peucker(path, epsilon, &mut kept);
+        //     kept
+        // });
+
+        // let mut simplified_pathes = vec![];
+
+        // for (kept, path) in kepts.zip(pathes.iter()) {
+        //     let simplified_path = kept
+        //         .into_iter()
+        //         .zip(path)
+        //         .filter(|&(k, _)| k)
+        //         .map(|(_, p)| *p)
+        //         .collect::<Vec<_>>();
+        //     simplified_pathes.push(simplified_path);
+        // }
+
+        // let pathes = simplified_pathes;
+        // println!("simplifying pathes took {:?}", t.elapsed());
+
+        // println!("pathes.len() = {}", pathes.len());
+
+        // let output_path = std::path::Path::new(output_prefix)
+        //     .join(format!("{}_{}_{}_{}.svg", input_file_name, s, l, h));
+
+        // write_pathes_as_svg(
+        //     std::io::BufWriter::new(File::create(output_path).unwrap()),
+        //     &pathes,
+        //     height as usize,
+        //     width as usize,
+        // )
+        // .unwrap();
+
+        let mut pathes = pathes;
+        pathes.sort_by(|a, b| path_length(b).partial_cmp(&path_length(a)).unwrap());
+        pathes.truncate(2000);
+        pathes.extend(connect_pathes(&pathes));
+
+        let output_path = std::path::Path::new(output_prefix).join(format!(
+            "{}_{}_{}_{}_2k_hull_connected.svg",
+            input_file_name, s, l, h
+        ));
+
+        let num_points = pathes.iter().map(|p| p.len()).sum::<usize>();
+        println!("num points = {}", num_points);
+
         write_pathes_as_svg(
-            File::create(output_path).unwrap(),
+            std::io::BufWriter::new(File::create(output_path).unwrap()),
             &pathes,
             height as usize,
             width as usize,

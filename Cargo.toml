@@ -1,5 +1,5 @@
 [package]
-name = "canny_devernay"
+name = "circles_drawing"
 version = "0.1.0"
 edition = "2021"
 
@@ -7,3 +7,5 @@ edition = "2021"
 
 [dependencies]
 image = { version = "0.23.14", default_features = false, features = ["pnm"] }
+rand = "0.8.4"
+ordered-float = "2.10.0"
