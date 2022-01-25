@@ -7,7 +7,6 @@ pub mod euler_cycle;
 pub mod graham_scan;
 pub mod kruskal;
 pub mod ramer_douglas_peucker;
-pub mod simulated_annealing;
 pub mod utils;
 
 pub fn write_pathes_as_svg<W: std::io::Write>(
