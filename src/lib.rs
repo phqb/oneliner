@@ -12,7 +12,7 @@ pub mod utils;
 
 pub fn write_pathes_as_svg<W: std::io::Write>(
     mut output: W,
-    pathes: &[Vec<(f64, f64)>],
+    pathes: &[&Vec<(f64, f64)>],
     input_height: usize,
     input_width: usize,
 ) -> std::io::Result<()> {
@@ -36,7 +36,7 @@ pub fn write_pathes_as_svg<W: std::io::Write>(
             r#"<polyline stroke-width="1" fill="none" stroke="black" points=""#
         )?;
 
-        for (x, y) in path {
+        for (x, y) in path.iter() {
             write!(output, "{:.4},{:.4} ", *x, *y)?;
         }
 
@@ -44,6 +44,115 @@ pub fn write_pathes_as_svg<W: std::io::Write>(
     }
 
     writeln!(output, "</svg>")?;
+
+    Ok(())
+}
+
+pub fn write_pathes_as_json<W: std::io::Write>(
+    output: &mut W,
+    pathes: &[&[(f64, f64)]],
+    input_height: usize,
+    input_width: usize,
+) -> std::io::Result<()> {
+    writeln!(output, "{{")?;
+    writeln!(output, r#"  "width": {},"#, input_width)?;
+    writeln!(output, r#"  "height": {},"#, input_height)?;
+    writeln!(output, r#"  "pathes": ["#)?;
+
+    let n = pathes.len();
+
+    for (i, path) in pathes.iter().enumerate() {
+        write!(output, "    [")?;
+
+        let m = path.len();
+        for (j, (x, y)) in path.iter().enumerate() {
+            write!(output, "[{:.4}, {:.4}]", x, y)?;
+            if j + 1 < m {
+                write!(output, ", ")?;
+            }
+        }
+
+        write!(output, "]")?;
+
+        if i + 1 < n {
+            writeln!(output, ",")?;
+        } else {
+            writeln!(output)?;
+        }
+    }
+
+    writeln!(output, "  ]")?;
+    writeln!(output, "}}")?;
+
+    Ok(())
+}
+
+pub fn write_html<W: std::io::Write>(
+    output: &mut W,
+    path: &[(f64, f64)],
+    input_height: usize,
+    input_width: usize,
+) -> std::io::Result<()> {
+    writeln!(
+        output,
+        r#"<!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta http-equiv="X-UA-Compatible" content="IE=edge">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Document</title>
+    </head>
+    <body>"#
+    )?;
+    writeln!(output, "<script>")?;
+    write!(output, "const DATA = ")?;
+
+    write_pathes_as_json(output, &[path], input_height, input_width)?;
+
+    writeln!(
+        output,
+        r#"
+    </script>
+
+    <canvas id="drawing" width="{}" height="{}"></canvas>
+  
+    <script>
+    function startDrawing() {{
+      let start;
+
+      const points = DATA.pathes[0];
+      const n = points.length;
+      const ctx = document.getElementById('drawing').getContext('2d'); 
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.25)';
+      ctx.lineWidth = 4;
+  
+      let i = 0;
+
+      function drawStep(timestamp) {{
+        ctx.beginPath();
+        ctx.moveTo(points[i][0], points[i][1]);
+        ctx.lineTo(points[i + 1][0], points[i + 1][1]);
+        ctx.closePath(); 
+        ctx.stroke(); 
+
+        i += 1;
+
+        if (i + 1 == n) return;
+
+        window.requestAnimationFrame(drawStep);
+      }}
+
+      window.requestAnimationFrame(drawStep);
+    }}
+
+    startDrawing();
+  </script>
+  </body>
+  </html>
+    "#,
+        input_width, input_height
+    )?;
 
     Ok(())
 }

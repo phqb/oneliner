@@ -538,7 +538,9 @@ fn chained_edge_points_to_pathes(
         if end != start {
             marked[end] = true;
             path.push((e_xs[end], e_ys[end]));
+        }
 
+        if !path.is_empty() {
             pathes.push(path);
         }
     }

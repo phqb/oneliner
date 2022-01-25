@@ -1,7 +1,9 @@
 use std::fs::File;
 
 use circles_drawing::{
-    canny_devernay::canny_devernay, connect_pathes, path_length, utils::*, write_pathes_as_svg,
+    canny_devernay::canny_devernay, connect_pathes, csr_graph, euler_cycle::euler_cycle,
+    graham_scan::graham_scan, path_length, simplify_pathes, utils::*, write_html,
+    write_pathes_as_json, write_pathes_as_svg,
 };
 use image::{codecs::pnm::PnmDecoder, ColorType, ImageDecoder};
 
@@ -28,21 +30,23 @@ fn main() {
     };
 
     let params = vec![
-        (0, 0, 0),
-        (1, 0, 0),
-        (2, 0, 0),
-        (1, 5, 5),
-        (1, 10, 10),
-        (1, 15, 15),
-        (1, 20, 20),
-        (1, 5, 10),
-        (1, 5, 15),
+        // (0, 0, 0),
+        // (1, 0, 0),
+        // (2, 0, 0),
+        // (1, 5, 5),
+        // (1, 10, 10),
+        // (1, 15, 15),
+        // (1, 20, 20),
+        // (1, 5, 10),
+        // (1, 5, 15),
         (1, 5, 20),
-        (1, 0, 15),
-        (1, 1, 15),
-        (1, 3, 15),
-        (1, 10, 15),
+        // (1, 0, 15),
+        // (1, 1, 15),
+        // (1, 3, 15),
+        // (1, 10, 15),
     ];
+
+    let num_pathes = 300;
 
     for (s, l, h) in params {
         println!("S = {}, L = {}, H = {}", s, l, h);
@@ -56,59 +60,96 @@ fn main() {
             l as f64,
         );
 
-        // let t = std::time::Instant::now();
-        // let epsilon = (width as f64) * 0.02;
-
-        // let kepts = pathes.iter().map(|path| {
-        //     let mut kept = vec![false; path.len()];
-        //     ramer_douglas_peucker(path, epsilon, &mut kept);
-        //     kept
-        // });
-
-        // let mut simplified_pathes = vec![];
-
-        // for (kept, path) in kepts.zip(pathes.iter()) {
-        //     let simplified_path = kept
-        //         .into_iter()
-        //         .zip(path)
-        //         .filter(|&(k, _)| k)
-        //         .map(|(_, p)| *p)
-        //         .collect::<Vec<_>>();
-        //     simplified_pathes.push(simplified_path);
-        // }
-
-        // let pathes = simplified_pathes;
-        // println!("simplifying pathes took {:?}", t.elapsed());
-
-        // println!("pathes.len() = {}", pathes.len());
-
-        // let output_path = std::path::Path::new(output_prefix)
-        //     .join(format!("{}_{}_{}_{}.svg", input_file_name, s, l, h));
-
-        // write_pathes_as_svg(
-        //     std::io::BufWriter::new(File::create(output_path).unwrap()),
-        //     &pathes,
-        //     height as usize,
-        //     width as usize,
-        // )
-        // .unwrap();
-
         let mut pathes = pathes;
         pathes.sort_by(|a, b| path_length(b).partial_cmp(&path_length(a)).unwrap());
-        pathes.truncate(2000);
-        pathes.extend(connect_pathes(&pathes));
+        pathes.truncate(num_pathes);
 
-        let output_path = std::path::Path::new(output_prefix).join(format!(
-            "{}_{}_{}_{}_2k_hull_connected.svg",
-            input_file_name, s, l, h
+        let mut hulls = pathes
+            .iter()
+            .map(|path| graham_scan(path))
+            .collect::<Vec<_>>();
+
+        simplify_pathes(&mut pathes, &mut hulls, 0.01 * width as f64);
+
+        let connectors = connect_pathes(&pathes, &hulls);
+
+        let mut path_starts = pathes.iter().map(|path| path.len()).collect::<Vec<_>>();
+        path_starts.insert(0, 0);
+        for i in 1..path_starts.len() {
+            path_starts[i] += path_starts[i - 1];
+        }
+
+        let final_path = {
+            let mut u_s = vec![];
+            let mut v_s = vec![];
+
+            for (i, path) in pathes.iter().enumerate() {
+                for j in 0..path.len() - 1 {
+                    let u = path_starts[i] + j;
+                    let v = path_starts[i] + j + 1;
+
+                    for _ in 0..2 {
+                        u_s.push(u);
+                        v_s.push(v);
+
+                        u_s.push(v);
+                        v_s.push(u);
+                    }
+                }
+            }
+
+            for &((u, from), (v, to)) in connectors.iter() {
+                let u = path_starts[u] + from;
+                let v = path_starts[v] + to;
+
+                for _ in 0..2 {
+                    u_s.push(u);
+                    v_s.push(v);
+
+                    u_s.push(v);
+                    v_s.push(u);
+                }
+            }
+
+            let (_, adjs, adj_starts) =
+                csr_graph::from_edges(path_starts[path_starts.len() - 1], &u_s, &v_s, &[]);
+            let cycle = euler_cycle(&adjs, &adj_starts, u_s[0]);
+
+            assert_eq!(cycle[0], cycle[cycle.len() - 1]);
+
+            cycle
+                .into_iter()
+                .map(|u| {
+                    let p = path_starts.partition_point(|&i| i <= u) - 1;
+                    let i = u - path_starts[p];
+                    pathes[p][i]
+                })
+                .collect::<Vec<_>>()
+        };
+
+        println!("num points = {}", final_path.len());
+
+        let svg_output_file = std::path::Path::new(output_prefix).join(format!(
+            "{}_{}_{}_{}_{}_hull_simplified_connected_eulerian.svg",
+            input_file_name, s, l, h, num_pathes
         ));
 
-        let num_points = pathes.iter().map(|p| p.len()).sum::<usize>();
-        println!("num points = {}", num_points);
-
         write_pathes_as_svg(
-            std::io::BufWriter::new(File::create(output_path).unwrap()),
-            &pathes,
+            std::io::BufWriter::new(File::create(svg_output_file).unwrap()),
+            &[&final_path],
+            height as usize,
+            width as usize,
+        )
+        .unwrap();
+
+        let html_output_file = std::path::Path::new(output_prefix).join(format!(
+            "{}_{}_{}_{}_{}_hull_simplified_connected_eulerian.html",
+            input_file_name, s, l, h, num_pathes
+        ));
+
+        write_html(
+            &mut std::io::BufWriter::new(File::create(html_output_file).unwrap()),
+            &final_path,
             height as usize,
             width as usize,
         )

@@ -58,9 +58,71 @@ pub fn tsp_simulated_annealing(cities: &[(f64, f64)], num_iterations: usize) -> 
     min_s
 }
 
+fn assignment_weight<T: Copy + Default + std::ops::AddAssign>(
+    cost_matrix: &[T],
+    dim: usize,
+    state: &[usize],
+) -> T {
+    let mut cost = T::default();
+    for (i, &j) in state.iter().enumerate() {
+        cost += cost_matrix[i * dim + j];
+    }
+    cost
+}
+
+pub fn assignment_simulated_annealing(
+    cost_matrix: &[f64],
+    dim: usize,
+    num_iterations: usize,
+) -> Vec<usize> {
+    let mut rng = rand::thread_rng();
+
+    let mut s = (0..dim).collect::<Vec<_>>();
+    let mut w = assignment_weight(cost_matrix, dim, &s);
+    let mut min_s = s.clone();
+    let mut min_w = w;
+    let mut t = 100.0;
+    let alpha = 0.9995;
+
+    for _ in 0..num_iterations {
+        let i = rng.gen_range(0..dim);
+        let mut j = rng.gen_range(0..dim);
+        while j == i {
+            j = rng.gen_range(0..dim);
+        }
+
+        s.swap(i, j);
+        let w_new = assignment_weight(cost_matrix, dim, &s);
+
+        if w_new <= w {
+            w = w_new;
+        } else {
+            let r = rng.gen::<f64>();
+            let p = (-(w_new - w) / t).exp();
+
+            if p >= r {
+                w = w_new;
+            } else {
+                s.swap(i, j);
+            }
+        }
+
+        if w < min_w {
+            min_w = w;
+            min_s = s.clone();
+        }
+
+        t *= alpha;
+    }
+
+    min_s
+}
+
 #[cfg(test)]
 mod test {
     use std::io::Write;
+
+    use rand::Rng;
 
     use super::tsp_simulated_annealing;
 
@@ -138,5 +200,33 @@ mod test {
         }
 
         writeln!(buf_writer, "</svg>").unwrap();
+    }
+
+    #[test]
+    fn test_assignment() {
+        let mut rng = rand::thread_rng();
+
+        let dim = rng.gen_range(3..=10);
+        let mut cost_matrix = Vec::<u32>::with_capacity(dim * dim);
+        for _ in 0..dim * dim {
+            cost_matrix.push(rng.gen_range(1..100000));
+        }
+
+        let cost_matrix_f64 = cost_matrix.iter().map(|c| *c as f64).collect::<Vec<_>>();
+
+        // println!("{:?}", cost_matrix);
+
+        let exact_result = hungarian::minimize(&cost_matrix, dim, dim)
+            .into_iter()
+            .collect::<Option<Vec<_>>>()
+            .unwrap();
+        let exact_cost = super::assignment_weight(&cost_matrix, dim, &exact_result);
+        // println!("exact result = {:?}", exact_result);
+        println!("exact cost = {}", exact_cost);
+
+        let sa_result = super::assignment_simulated_annealing(&cost_matrix_f64, dim, 50000);
+        let sa_cost = super::assignment_weight(&cost_matrix, dim, &sa_result);
+        // println!("sa result = {:?}", sa_result);
+        println!("sa cost = {}", sa_cost);
     }
 }

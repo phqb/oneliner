@@ -9,7 +9,11 @@ fn squared_perpendicular_dist(x0: f64, y0: f64, x1: f64, y1: f64, x2: f64, y2: f
     let a = a * a;
     let b = x2_minus_x1 * x2_minus_x1 + y2_minus_y1 * y2_minus_y1;
 
-    a / b
+    if b != 0.0 {
+        a / b
+    } else {
+        0.0
+    }
 }
 
 /// https://en.wikipedia.org/wiki/Ramer%E2%80%93Douglas%E2%80%93Peucker_algorithm
