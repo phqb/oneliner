@@ -548,6 +548,7 @@ fn chained_edge_points_to_pathes(
     pathes
 }
 
+/// Edges detection. Return a list of edge pathes.
 pub fn canny_devernay(
     input: &[u8],
     input_height: usize,
@@ -556,20 +557,13 @@ pub fn canny_devernay(
     h: f64,
     l: f64,
 ) -> Vec<Vec<(f64, f64)>> {
-    let t = std::time::Instant::now();
     let (g_xs, g_ys) = image_gradient(input, input_height, input_width, s);
-    eprintln!("image_gradient() took {:?}", t.elapsed());
 
-    let t = std::time::Instant::now();
     let (e_xs, e_ys) = compute_edge_points(&g_xs, &g_ys, input_height, input_width);
-    eprintln!("compute_edge_points() took {:?}", t.elapsed());
 
-    let t = std::time::Instant::now();
     let (mut prev, mut next) =
         chain_edge_points(&g_xs, &g_ys, &e_xs, &e_ys, input_height, input_width);
-    eprintln!("chain_edge_points() took {:?}", t.elapsed());
 
-    let t = std::time::Instant::now();
     thresholds_with_hysteresis(
         &mut prev,
         &mut next,
@@ -580,12 +574,9 @@ pub fn canny_devernay(
         input_height,
         input_width,
     );
-    eprintln!("thresholds_with_hysteresis() took {:?}", t.elapsed());
 
-    let t = std::time::Instant::now();
     let pathes =
         chained_edge_points_to_pathes(&prev, &next, &e_xs, &e_ys, input_height, input_width);
-    eprintln!("converting to pathes took {:?}", t.elapsed());
 
     pathes
 }
