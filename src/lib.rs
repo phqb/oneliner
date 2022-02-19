@@ -1,12 +1,13 @@
-use ramer_douglas_peucker::ramer_douglas_peucker;
+use convex_hull::graham_scan;
+use path_simplifier::ramer_douglas_peucker;
 use utils::{c2i, squared_norm};
 
 pub mod canny_devernay;
+pub mod convex_hull;
 pub mod csr_graph;
 pub mod euler_cycle;
-pub mod graham_scan;
 pub mod kruskal;
-pub mod ramer_douglas_peucker;
+pub mod path_simplifier;
 pub mod utils;
 
 pub fn write_pathes_as_svg<W: std::io::Write>(
@@ -277,36 +278,26 @@ pub fn connect_pathes(
     points
 }
 
-pub fn simplify_pathes(
-    pathes: &mut [Vec<(f64, f64)>],
-    kept_indexes: &mut [Vec<usize>],
-    epsilon_squared: f64,
-) {
-    let mut kepts = pathes
+pub fn convex_hulls(pathes: &[Vec<(f64, f64)>]) -> Vec<Vec<usize>> {
+    pathes
         .iter()
-        .zip(kept_indexes.iter())
-        .map(|(p, hull)| {
-            let mut kept = vec![false; p.len()];
-            for &h in hull {
-                kept[h] = true;
-            }
-            kept
-        })
-        .collect::<Vec<_>>();
+        .map(|path| graham_scan(path))
+        .collect::<Vec<_>>()
+}
 
-    for (path, kept) in pathes.iter().zip(kepts.iter_mut()) {
-        ramer_douglas_peucker(path, epsilon_squared, kept);
-    }
+pub fn simplify_pathes(pathes: &mut [Vec<(f64, f64)>], epsilon_squared: f64) {
+    let max_len = pathes.iter().map(|p| p.len()).max().unwrap_or_default();
+    let mut kept = vec![false; max_len];
 
-    for ((path, kept), hull) in pathes.iter_mut().zip(kepts).zip(kept_indexes.iter_mut()) {
-        for (i, k) in kept.into_iter().enumerate().rev() {
-            if !k {
+    for path in pathes {
+        for i in 0..path.len() {
+            kept[i] = false;
+        }
+
+        ramer_douglas_peucker(path, epsilon_squared, &mut kept);
+        for i in (0..path.len()).rev() {
+            if !kept[i] {
                 path.remove(i);
-                for h in hull.iter_mut() {
-                    if *h > i {
-                        *h -= 1;
-                    }
-                }
             }
         }
     }

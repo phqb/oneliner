@@ -1,9 +1,8 @@
 use std::fs::File;
 
 use circles_drawing::{
-    canny_devernay::canny_devernay, connect_pathes, csr_graph, euler_cycle::euler_cycle,
-    graham_scan::graham_scan, path_length, simplify_pathes, utils::*, write_html,
-    write_pathes_as_json, write_pathes_as_svg,
+    canny_devernay::canny_devernay, connect_pathes, convex_hulls, csr_graph,
+    euler_cycle::euler_cycle, path_length, simplify_pathes, utils::*, write_pathes_as_svg,
 };
 use image::{codecs::pnm::PnmDecoder, ColorType, ImageDecoder};
 
@@ -64,12 +63,9 @@ fn main() {
         pathes.sort_by(|a, b| path_length(b).partial_cmp(&path_length(a)).unwrap());
         pathes.truncate(num_pathes);
 
-        let mut hulls = pathes
-            .iter()
-            .map(|path| graham_scan(path))
-            .collect::<Vec<_>>();
+        simplify_pathes(&mut pathes, 0.004 * width as f64);
 
-        simplify_pathes(&mut pathes, &mut hulls, 0.01 * width as f64);
+        let hulls = convex_hulls(&pathes);
 
         let connectors = connect_pathes(&pathes, &hulls);
 
@@ -130,26 +126,13 @@ fn main() {
         println!("num points = {}", final_path.len());
 
         let svg_output_file = std::path::Path::new(output_prefix).join(format!(
-            "{}_{}_{}_{}_{}_hull_simplified_connected_eulerian.svg",
+            "{}_{}_{}_{}_{}_hull_simplified_connected_eulerian_2.svg",
             input_file_name, s, l, h, num_pathes
         ));
 
         write_pathes_as_svg(
             std::io::BufWriter::new(File::create(svg_output_file).unwrap()),
             &[&final_path],
-            height as usize,
-            width as usize,
-        )
-        .unwrap();
-
-        let html_output_file = std::path::Path::new(output_prefix).join(format!(
-            "{}_{}_{}_{}_{}_hull_simplified_connected_eulerian.html",
-            input_file_name, s, l, h, num_pathes
-        ));
-
-        write_html(
-            &mut std::io::BufWriter::new(File::create(html_output_file).unwrap()),
-            &final_path,
             height as usize,
             width as usize,
         )
