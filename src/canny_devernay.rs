@@ -548,15 +548,23 @@ fn chained_edge_points_to_pathes(
     pathes
 }
 
+pub struct Params {
+    pub s: f64,
+    pub h: f64,
+    pub l: f64,
+}
+
 /// Edges detection. Return a list of edge pathes.
 pub fn canny_devernay(
     input: &[u8],
     input_height: usize,
     input_width: usize,
-    s: f64,
-    h: f64,
-    l: f64,
+    params: Params,
 ) -> Vec<Vec<(f64, f64)>> {
+    let s = params.s;
+    let h = params.h;
+    let l = params.l;
+
     let (g_xs, g_ys) = image_gradient(input, input_height, input_width, s);
 
     let (e_xs, e_ys) = compute_edge_points(&g_xs, &g_ys, input_height, input_width);

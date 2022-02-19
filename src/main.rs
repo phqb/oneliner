@@ -1,9 +1,6 @@
 use std::fs::File;
 
-use circles_drawing::{
-    canny_devernay::canny_devernay, connect_pathes, convex_hulls, csr_graph,
-    euler_cycle::euler_cycle, path_length, simplify_pathes, utils::*, write_pathes_as_svg,
-};
+use circles_drawing::{canny_devernay::Params, image_to_cycle, utils::*, write_pathes_as_svg};
 use image::{codecs::pnm::PnmDecoder, ColorType, ImageDecoder};
 
 fn main() {
@@ -50,78 +47,17 @@ fn main() {
     for (s, l, h) in params {
         println!("S = {}, L = {}, H = {}", s, l, h);
 
-        let pathes = canny_devernay(
+        let final_path = image_to_cycle(
             &image_gray,
             height as usize,
             width as usize,
-            s as f64,
-            h as f64,
-            l as f64,
+            Params {
+                s: s as f64,
+                h: h as f64,
+                l: l as f64,
+            },
+            num_pathes,
         );
-
-        let mut pathes = pathes;
-        pathes.sort_by(|a, b| path_length(b).partial_cmp(&path_length(a)).unwrap());
-        pathes.truncate(num_pathes);
-
-        simplify_pathes(&mut pathes, 0.004 * width as f64);
-
-        let hulls = convex_hulls(&pathes);
-
-        let connectors = connect_pathes(&pathes, &hulls);
-
-        let mut path_starts = pathes.iter().map(|path| path.len()).collect::<Vec<_>>();
-        path_starts.insert(0, 0);
-        for i in 1..path_starts.len() {
-            path_starts[i] += path_starts[i - 1];
-        }
-
-        let final_path = {
-            let mut u_s = vec![];
-            let mut v_s = vec![];
-
-            for (i, path) in pathes.iter().enumerate() {
-                for j in 0..path.len() - 1 {
-                    let u = path_starts[i] + j;
-                    let v = path_starts[i] + j + 1;
-
-                    for _ in 0..2 {
-                        u_s.push(u);
-                        v_s.push(v);
-
-                        u_s.push(v);
-                        v_s.push(u);
-                    }
-                }
-            }
-
-            for &((u, from), (v, to)) in connectors.iter() {
-                let u = path_starts[u] + from;
-                let v = path_starts[v] + to;
-
-                for _ in 0..2 {
-                    u_s.push(u);
-                    v_s.push(v);
-
-                    u_s.push(v);
-                    v_s.push(u);
-                }
-            }
-
-            let (_, adjs, adj_starts) =
-                csr_graph::from_edges(path_starts[path_starts.len() - 1], &u_s, &v_s, &[]);
-            let cycle = euler_cycle(&adjs, &adj_starts, u_s[0]);
-
-            assert_eq!(cycle[0], cycle[cycle.len() - 1]);
-
-            cycle
-                .into_iter()
-                .map(|u| {
-                    let p = path_starts.partition_point(|&i| i <= u) - 1;
-                    let i = u - path_starts[p];
-                    pathes[p][i]
-                })
-                .collect::<Vec<_>>()
-        };
 
         println!("num points = {}", final_path.len());
 

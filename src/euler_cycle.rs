@@ -123,9 +123,9 @@ mod test {
         .into_iter()
         .unzip();
 
-        let (_, adjs, adj_starts) = csr_graph::from_edges(num_nodes, &u_s, &v_s, &[]);
+        let g = csr_graph::from_edges(num_nodes, &u_s, &v_s);
 
-        let cycle = super::euler_cycle(&adjs, &adj_starts, 0);
+        let cycle = super::euler_cycle(&g.adjs, &g.adj_starts, 0);
         assert_eq!(cycle.len() - 1, u_s.len() / 2);
         assert_eq!(cycle, vec![0, 4, 5, 3, 2, 4, 1, 3, 0, 2, 1, 0]);
     }
@@ -137,7 +137,7 @@ mod test {
         for _ in 0..100000 {
             let num_nodes = rng.gen_range(1..=100);
             let (u_s, v_s) = generate_eulerian_graph(num_nodes);
-            let (_, adjs, adj_starts) = csr_graph::from_edges(num_nodes, &u_s, &v_s, &[]);
+            let g = csr_graph::from_edges(num_nodes, &u_s, &v_s);
 
             let mut expected_edges = HashMap::new();
             for (&u, &v) in u_s.iter().zip(v_s.iter()) {
@@ -151,7 +151,7 @@ mod test {
             assert!(expected_edges.iter().all(|(_, c)| *c % 2 == 0));
             expected_edges.iter_mut().for_each(|(_, c)| *c >>= 1);
 
-            let cycle = super::euler_cycle(&adjs, &adj_starts, u_s[0]);
+            let cycle = super::euler_cycle(&g.adjs, &g.adj_starts, u_s[0]);
 
             let mut actual_edges = HashMap::new();
             for (&u, &v) in cycle.iter().zip(cycle.iter().skip(1)) {
