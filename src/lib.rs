@@ -406,6 +406,8 @@ pub fn image_to_cycle(
     params: Params,
     max_num_pathes: usize,
 ) -> Vec<(f64, f64)> {
+    assert!(image.len() >= height * width);
+
     let pathes = canny_devernay::canny_devernay(&image, height, width, params);
 
     let mut pathes = n_longest(pathes, max_num_pathes);
@@ -425,11 +427,13 @@ pub fn wasm_image_to_cycle(
     height: usize,
     width: usize,
     s: f64,
-    h: f64,
     l: f64,
+    h: f64,
     max_num_pathes: usize,
 ) -> Vec<f64> {
-    image_to_cycle(image, height, width, Params { s, h, l }, max_num_pathes)
+    console_error_panic_hook::set_once();
+
+    image_to_cycle(image, height, width, Params { s, l, h }, max_num_pathes)
         .into_iter()
         .flat_map(|(x, y)| [x, y])
         .collect()

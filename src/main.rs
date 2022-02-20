@@ -53,8 +53,8 @@ fn main() {
             width as usize,
             Params {
                 s: s as f64,
-                h: h as f64,
                 l: l as f64,
+                h: h as f64,
             },
             num_pathes,
         );

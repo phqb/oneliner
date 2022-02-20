@@ -550,8 +550,8 @@ fn chained_edge_points_to_pathes(
 
 pub struct Params {
     pub s: f64,
-    pub h: f64,
     pub l: f64,
+    pub h: f64,
 }
 
 /// Edges detection. Return a list of edge pathes.
@@ -561,6 +561,8 @@ pub fn canny_devernay(
     input_width: usize,
     params: Params,
 ) -> Vec<Vec<(f64, f64)>> {
+    assert!(input.len() >= input_height * input_width);
+
     let s = params.s;
     let h = params.h;
     let l = params.l;
