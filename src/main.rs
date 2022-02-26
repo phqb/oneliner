@@ -1,7 +1,7 @@
 use std::fs::File;
 
-use circles_drawing::{canny_devernay::Params, image_to_cycle, utils::*, write_pathes_as_svg};
 use image::{codecs::pnm::PnmDecoder, ColorType, ImageDecoder};
+use oneliner::{canny_devernay::Params, image_to_cycle, utils::*, write_pathes_as_svg};
 
 fn main() {
     let args = std::env::args().into_iter().take(3).collect::<Vec<_>>();
